@@ -21,6 +21,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
   : [
       'http://localhost:3000',
+      'http://localhost:3001',
       'https://grupovisualcont.vercel.app',
       'https://pagina-web-grupo-visual-cont.vercel.app'
     ];
