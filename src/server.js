@@ -18,8 +18,16 @@ const PORT = process.env.PORT || 3001;
 
 // Configurar CORS
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002'];
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'https://grupovisualcont.vercel.app',
+      'https://pagina-web-grupo-visual-cont.vercel.app'
+    ];
+
+console.log('🌐 CORS - Orígenes permitidos:', allowedOrigins);
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -27,14 +35,18 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     if (allowedOrigins.includes(origin)) {
+      console.log('✅ CORS permitido para:', origin);
       callback(null, true);
     } else {
+      console.log('❌ CORS bloqueado para:', origin);
       callback(new Error('No permitido por CORS'));
     }
   },
-  credentials: true, // importante para enviar cookies
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Set-Cookie'],
+  maxAge: 86400 // 24 horas
 }));
 
 // Middleware
