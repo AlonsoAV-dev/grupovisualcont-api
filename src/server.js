@@ -23,7 +23,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'http://localhost:3000',
       'http://localhost:3001',
       'https://grupovisualcont-admin.vercel.app',
-      'https://pagina-web-grupo-visual-cont.vercel.app'
+      'https://pagina-web-grupo-visual-cont.vercel.app',
+      'https://grupovisualcont.com'
     ];
 
 console.log('🌐 CORS - Orígenes permitidos:', allowedOrigins);
