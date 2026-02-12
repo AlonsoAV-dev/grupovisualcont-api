@@ -25,7 +25,7 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'https://grupovisualcont-admin.vercel.app',
       'https://grupovisualcont.com',
       'https://www.grupovisualcont.com',
-      'https://grupovisualcont-prueba-ifjx.vercel.app',
+      'https://grupovisualcont-prueba.vercel.app',
       'https://pagina-web-grupo-visual-cont.vercel.app'
     ];
 
