@@ -29,13 +29,13 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'https://pagina-web-grupo-visual-cont.vercel.app'
     ];
 
-console.log('🌐 CORS - Orígenes permitidos:', allowedOrigins);
+console.log('CORS - Orígenes permitidos:', allowedOrigins);
 
 app.use(cors({
   origin: function (origin, callback) {
     // Permitir requests sin origin (Postman, curl, etc.)
     if (!origin) {
-      console.log('✅ CORS permitido: Sin origen (herramienta)');
+      console.log('CORS permitido: Sin origen (herramienta)');
       return callback(null, true);
     }
     

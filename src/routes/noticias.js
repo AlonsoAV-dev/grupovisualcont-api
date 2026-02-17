@@ -44,6 +44,42 @@ function generarSlug(texto) {
     .replace(/^-+|-+$/g, '');
 }
 
+// Función helper para procesar URLs de imágenes (Google Drive)
+function procesarUrlImagen(url) {
+  // Si no hay URL, retornar null
+  if (!url || url.trim() === '') {
+    return { success: true, url: null };
+  }
+
+  const urlLimpia = url.trim();
+
+  // Validar que sea una URL válida
+  try {
+    new URL(urlLimpia);
+  } catch (error) {
+    return { success: false, error: 'La URL de la imagen no es válida' };
+  }
+
+  // Detectar si es una URL de Google Drive
+  const patronDrive1 = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/; // https://drive.google.com/file/d/ID/view...
+  const patronDrive2 = /drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/; // https://drive.google.com/open?id=ID
+
+  let match = urlLimpia.match(patronDrive1);
+  if (!match) {
+    match = urlLimpia.match(patronDrive2);
+  }
+
+  // Si es de Google Drive
+  if (match && match[1]) {
+    const driveId = match[1];
+    const urlFinal = `https://drive.google.com/thumbnail?sz=w1500-h1200&id=${driveId}`;
+    return { success: true, url: urlFinal, esGoogleDrive: true };
+  }
+
+  // Si NO es de Google Drive pero es una URL válida, retornar tal cual
+  return { success: true, url: urlLimpia, esGoogleDrive: false };
+}
+
 // GET /api/noticias/slug/:slug (debe ir antes de /:id)
 router.get('/slug/:slug', async (req, res) => {
   try {
@@ -167,6 +203,13 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Campos requeridos: titulo, contenido, nombre_autor' });
     }
 
+    // Procesar URL de imagen (validar y transformar si es Google Drive)
+    const resultadoImagen = procesarUrlImagen(imagen_principal);
+    if (!resultadoImagen.success) {
+      return res.status(400).json({ error: resultadoImagen.error });
+    }
+    const imagenProcesada = resultadoImagen.url;
+
     const descripcion_corta = generarDescripcionCorta(contenido);
     const cod_unico = `NOT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -190,7 +233,7 @@ router.post('/', requireAuth, async (req, res) => {
       `INSERT INTO noticias 
        (cod_unico, titulo, slug, contenido, descripcion_corta, imagen_principal, id_categoria, id_servicio, nombre_autor, estado, fecha_publicacion) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [cod_unico, titulo, slug, contenido, descripcion_corta, imagen_principal || null,
+      [cod_unico, titulo, slug, contenido, descripcion_corta, imagenProcesada,
        id_categoria || null, null, nombre_autor, estado || 'borrador', fecha_publicacion]
     );
 
@@ -279,6 +322,13 @@ router.put('/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Titulo y contenido son requeridos' });
     }
 
+    // Procesar URL de imagen (validar y transformar si es Google Drive)
+    const resultadoImagen = procesarUrlImagen(imagen_principal);
+    if (!resultadoImagen.success) {
+      return res.status(400).json({ error: resultadoImagen.error });
+    }
+    const imagenProcesada = resultadoImagen.url;
+
     const descripcion_corta = generarDescripcionCorta(contenido);
     let slug = generarSlug(titulo);
     
@@ -309,7 +359,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       `UPDATE noticias 
        SET titulo = ?, slug = ?, contenido = ?, descripcion_corta = ?, imagen_principal = ?, id_categoria = ?, nombre_autor = ?, estado = ?, fecha_publicacion = ?
        WHERE id_noticia = ?`,
-      [titulo, slug, contenido, descripcion_corta, imagen_principal || null, id_categoria || null, 
+      [titulo, slug, contenido, descripcion_corta, imagenProcesada, id_categoria || null, 
        nombre_autor, estado || 'borrador', fecha_publicacion, id]
     );
 
