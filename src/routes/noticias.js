@@ -1,6 +1,6 @@
 import express from 'express';
 import { query } from '../config/db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, checkNoticiaPermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -89,7 +89,7 @@ router.get('/slug/:slug', async (req, res) => {
       `SELECT 
         n.id_noticia, n.cod_unico, n.titulo, n.slug, n.contenido, n.descripcion_corta,
         n.imagen_principal, n.estado, n.fecha_publicacion, n.creado_en, n.id_categoria,
-        a.nombre as autor_nombre, a.email as autor_email,
+        a.nombre as autor_nombre, a.email as autor_email, a.id_usuario as autor_id_usuario,
         c.nombre as categoria_nombre, c.slug as categoria_slug,
         GROUP_CONCAT(DISTINCT CONCAT(k.id_keyword, ':', k.nombre) SEPARATOR '||') as keywords_raw
        FROM noticias n
@@ -134,8 +134,9 @@ router.get('/', async (req, res) => {
       SELECT 
         n.id_noticia, n.cod_unico, n.titulo, n.slug, n.descripcion_corta,
         n.imagen_principal, n.estado, n.fecha_publicacion, n.creado_en,
-        n.id_categoria, n.nombre_autor,
-        COALESCE(n.nombre_autor, a.nombre) as autor_nombre,
+        n.id_categoria,
+        a.nombre as autor_nombre,
+        a.id_usuario as autor_id_usuario,
         c.nombre as categoria_nombre, c.slug as categoria_slug
       FROM noticias n
       LEFT JOIN autor a ON n.id_autor = a.id_autor
@@ -196,11 +197,46 @@ router.post('/', requireAuth, async (req, res) => {
   try {
     const { 
       titulo, contenido, imagen_principal, id_categoria, 
-      nombre_autor, estado, keywords 
+      estado, keywords 
     } = req.body;
 
-    if (!titulo || !contenido || !nombre_autor) {
-      return res.status(400).json({ error: 'Campos requeridos: titulo, contenido, nombre_autor' });
+    if (!titulo || !contenido) {
+      return res.status(400).json({ error: 'Campos requeridos: titulo, contenido' });
+    }
+
+    // Obtener el id_autor del usuario autenticado
+    const userId = req.user.id;
+    let autorResult = await query(
+      'SELECT id_autor FROM autor WHERE id_usuario = ? AND estado = "activo"',
+      [userId]
+    );
+
+    let id_autor;
+
+    // Si no existe el autor, crearlo automáticamente
+    if (autorResult.length === 0) {
+      const userResult = await query(
+        'SELECT nombre, email FROM usuarios WHERE id_usuario = ?',
+        [userId]
+      );
+
+      if (userResult.length === 0) {
+        return res.status(400).json({ 
+          error: 'Usuario no encontrado.' 
+        });
+      }
+
+      const { nombre, email } = userResult[0];
+
+      const newAutor = await query(
+        `INSERT INTO autor (nombre, email, estado, tipo, id_usuario) 
+         VALUES (?, ?, 'activo', 'interno', ?)`,
+        [nombre, email, userId]
+      );
+
+      id_autor = newAutor.insertId;
+    } else {
+      id_autor = autorResult[0].id_autor;
     }
 
     // Procesar URL de imagen (validar y transformar si es Google Drive)
@@ -231,10 +267,10 @@ router.post('/', requireAuth, async (req, res) => {
 
     const result = await query(
       `INSERT INTO noticias 
-       (cod_unico, titulo, slug, contenido, descripcion_corta, imagen_principal, id_categoria, id_servicio, nombre_autor, estado, fecha_publicacion) 
+       (cod_unico, titulo, slug, contenido, descripcion_corta, imagen_principal, id_categoria, id_servicio, id_autor, estado, fecha_publicacion) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [cod_unico, titulo, slug, contenido, descripcion_corta, imagenProcesada,
-       id_categoria || null, null, nombre_autor, estado || 'borrador', fecha_publicacion]
+       id_categoria || null, null, id_autor, estado || 'borrador', fecha_publicacion]
     );
 
     const id_noticia = result.insertId;
@@ -279,7 +315,12 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
 
     const noticias = await query(
-      `SELECT n.*, a.nombre as autor_nombre, s.nombre as servicio_nombre, c.nombre as categoria_nombre, c.slug as categoria_slug
+      `SELECT n.*, 
+       a.nombre as autor_nombre, 
+       a.id_usuario as autor_id_usuario,
+       s.nombre as servicio_nombre, 
+       c.nombre as categoria_nombre, 
+       c.slug as categoria_slug
        FROM noticias n
        LEFT JOIN autor a ON n.id_autor = a.id_autor
        LEFT JOIN servicios s ON n.id_servicio = s.id_servicio
@@ -313,10 +354,10 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/noticias/:id
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, checkNoticiaPermission, async (req, res) => {
   try {
     const { id } = req.params;
-    const { titulo, contenido, imagen_principal, id_categoria, nombre_autor, estado, keywords } = req.body;
+    const { titulo, contenido, imagen_principal, id_categoria, estado, keywords } = req.body;
 
     if (!titulo || !contenido) {
       return res.status(400).json({ error: 'Titulo y contenido son requeridos' });
@@ -357,10 +398,10 @@ router.put('/:id', requireAuth, async (req, res) => {
 
     await query(
       `UPDATE noticias 
-       SET titulo = ?, slug = ?, contenido = ?, descripcion_corta = ?, imagen_principal = ?, id_categoria = ?, nombre_autor = ?, estado = ?, fecha_publicacion = ?
+       SET titulo = ?, slug = ?, contenido = ?, descripcion_corta = ?, imagen_principal = ?, id_categoria = ?, estado = ?, fecha_publicacion = ?
        WHERE id_noticia = ?`,
       [titulo, slug, contenido, descripcion_corta, imagenProcesada, id_categoria || null, 
-       nombre_autor, estado || 'borrador', fecha_publicacion, id]
+       estado || 'borrador', fecha_publicacion, id]
     );
 
     if (keywords && Array.isArray(keywords)) {
@@ -398,7 +439,7 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/noticias/:id
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, checkNoticiaPermission, async (req, res) => {
   try {
     const { id } = req.params;
 

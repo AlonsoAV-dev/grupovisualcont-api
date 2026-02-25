@@ -55,11 +55,22 @@ router.post('/', requireAuth, requireAdmin, async (req, res) => {
       [nombre, email, hashedPassword, rol]
     );
 
+    const id_usuario = result.insertId;
+
+    // Crear automáticamente el registro de autor para usuarios que pueden crear noticias
+    if (rol === 'editor' || rol === 'admin') {
+      await query(
+        `INSERT INTO autor (nombre, email, estado, tipo, id_usuario) 
+         VALUES (?, ?, 'activo', 'interno', ?)`,
+        [nombre, email, id_usuario]
+      );
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Usuario creado correctamente',
       usuario: {
-        id_usuario: result.insertId,
+        id_usuario,
         nombre,
         email,
         rol,

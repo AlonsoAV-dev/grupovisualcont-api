@@ -1,6 +1,6 @@
 import express from 'express';
 import { query } from '../config/db.js';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, checkComentarioPermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -14,10 +14,12 @@ router.get('/', async (req, res) => {
       SELECT 
         c.id_comentario, c.id_noticia, c.id_autor, c.comentario, c.estado, c.creado_en,
         a.nombre as autor_nombre, a.email as autor_email,
-        n.titulo as noticia_titulo
+        n.titulo as noticia_titulo,
+        autor_noticia.id_usuario as noticia_id_usuario
       FROM comentarios c
       INNER JOIN autor a ON c.id_autor = a.id_autor
       INNER JOIN noticias n ON c.id_noticia = n.id_noticia
+      INNER JOIN autor autor_noticia ON n.id_autor = autor_noticia.id_autor
       WHERE 1=1
     `;
     const params = [];
@@ -185,12 +187,8 @@ router.put('/:id', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/comentarios/:id
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, checkComentarioPermission, async (req, res) => {
   try {
-    if (req.user?.rol !== 'admin') {
-      return res.status(403).json({ error: 'Acceso denegado' });
-    }
-
     const { id } = req.params;
 
     await query('DELETE FROM comentarios WHERE id_comentario = ?', [id]);
