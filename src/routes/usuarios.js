@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { hashPassword, requireAuth } from '../middleware/auth.js';
+import { procesarUrlImagen } from '../utils/imageUtils.js';
 
 const router = express.Router();
 
@@ -16,9 +17,12 @@ const requireAdmin = async (req, res, next) => {
 router.get('/', requireAuth, requireAdmin, async (req, res) => {
   try {
     const usuarios = await query(
-      `SELECT id_usuario, nombre, email, rol, estado, ultimo_login, creado_en 
-       FROM usuarios 
-       ORDER BY creado_en DESC`
+      `SELECT 
+        u.id_usuario, u.nombre, u.email, u.rol, u.estado, u.ultimo_login, u.creado_en,
+        a.foto, a.descripcion
+       FROM usuarios u
+       LEFT JOIN autor a ON u.id_usuario = a.id_usuario
+       ORDER BY u.creado_en DESC`
     );
 
     return res.json({ success: true, usuarios });
@@ -31,7 +35,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
 // POST /api/usuarios
 router.post('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { nombre, email, password, rol } = req.body;
+    const { nombre, email, password, rol, foto, descripcion } = req.body;
 
     if (!nombre || !email || !password || !rol) {
       return res.status(400).json({ error: 'Todos los campos son requeridos' });
@@ -47,6 +51,16 @@ router.post('/', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'El email ya está registrado' });
     }
 
+    // Procesar URL de foto si está presente
+    let fotoProcesada = null;
+    if (foto) {
+      const resultadoFoto = procesarUrlImagen(foto);
+      if (!resultadoFoto.success) {
+        return res.status(400).json({ error: `Foto: ${resultadoFoto.error}` });
+      }
+      fotoProcesada = resultadoFoto.url;
+    }
+
     const hashedPassword = await hashPassword(password);
 
     const result = await query(
@@ -60,9 +74,9 @@ router.post('/', requireAuth, requireAdmin, async (req, res) => {
     // Crear automáticamente el registro de autor para usuarios que pueden crear noticias
     if (rol === 'editor' || rol === 'admin') {
       await query(
-        `INSERT INTO autor (nombre, email, estado, tipo, id_usuario) 
-         VALUES (?, ?, 'activo', 'interno', ?)`,
-        [nombre, email, id_usuario]
+        `INSERT INTO autor (nombre, email, foto, descripcion, estado, tipo, id_usuario) 
+         VALUES (?, ?, ?, ?, 'activo', 'interno', ?)`,
+        [nombre, email, fotoProcesada, descripcion || null, id_usuario]
       );
     }
 
@@ -89,7 +103,7 @@ router.post('/', requireAuth, requireAdmin, async (req, res) => {
 router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, email, password, rol, estado } = req.body;
+    const { nombre, email, password, rol, estado, foto, descripcion } = req.body;
 
     if (!nombre || !email || !rol) {
       return res.status(400).json({ error: 'Nombre, email y rol son requeridos' });
@@ -105,6 +119,16 @@ router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: 'El email ya está registrado por otro usuario' });
     }
 
+    // Procesar URL de foto si está presente
+    let fotoProcesada = null;
+    if (foto) {
+      const resultadoFoto = procesarUrlImagen(foto);
+      if (!resultadoFoto.success) {
+        return res.status(400).json({ error: `Foto: ${resultadoFoto.error}` });
+      }
+      fotoProcesada = resultadoFoto.url;
+    }
+
     let updateQuery = 'UPDATE usuarios SET nombre = ?, email = ?, rol = ?, estado = ? WHERE id_usuario = ?';
     let params = [nombre, email, rol, estado !== undefined ? estado : 1, id];
 
@@ -115,6 +139,41 @@ router.put('/:id', requireAuth, requireAdmin, async (req, res) => {
     }
 
     await query(updateQuery, params);
+
+    // Sincronizar con la tabla autor si el usuario tiene rol editor o admin
+    if (rol === 'editor' || rol === 'admin') {
+      const autorExistente = await query('SELECT id_autor FROM autor WHERE id_usuario = ?', [id]);
+
+      if (autorExistente.length > 0) {
+        // Actualizar autor existente
+        const updateAutorFields = ['nombre = ?', 'email = ?'];
+        const updateAutorParams = [nombre, email];
+
+        if (foto !== undefined) {
+          updateAutorFields.push('foto = ?');
+          updateAutorParams.push(fotoProcesada);
+        }
+
+        if (descripcion !== undefined) {
+          updateAutorFields.push('descripcion = ?');
+          updateAutorParams.push(descripcion);
+        }
+
+        updateAutorParams.push(id);
+
+        await query(
+          `UPDATE autor SET ${updateAutorFields.join(', ')} WHERE id_usuario = ?`,
+          updateAutorParams
+        );
+      } else {
+        // Crear autor si no existe
+        await query(
+          `INSERT INTO autor (nombre, email, foto, descripcion, estado, tipo, id_usuario) 
+           VALUES (?, ?, ?, ?, 'activo', 'interno', ?)`,
+          [nombre, email, fotoProcesada, descripcion || null, id]
+        );
+      }
+    }
 
     return res.json({ success: true, message: 'Usuario actualizado correctamente' });
   } catch (error) {

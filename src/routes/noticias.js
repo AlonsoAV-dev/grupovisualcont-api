@@ -1,6 +1,7 @@
 import express from 'express';
 import { query } from '../config/db.js';
 import { requireAuth, checkNoticiaPermission } from '../middleware/auth.js';
+import { procesarUrlImagen } from '../utils/imageUtils.js';
 
 const router = express.Router();
 
@@ -44,41 +45,7 @@ function generarSlug(texto) {
     .replace(/^-+|-+$/g, '');
 }
 
-// Función helper para procesar URLs de imágenes (Google Drive)
-function procesarUrlImagen(url) {
-  // Si no hay URL, retornar null
-  if (!url || url.trim() === '') {
-    return { success: true, url: null };
-  }
 
-  const urlLimpia = url.trim();
-
-  // Validar que sea una URL válida
-  try {
-    new URL(urlLimpia);
-  } catch (error) {
-    return { success: false, error: 'La URL de la imagen no es válida' };
-  }
-
-  // Detectar si es una URL de Google Drive
-  const patronDrive1 = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/; // https://drive.google.com/file/d/ID/view...
-  const patronDrive2 = /drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/; // https://drive.google.com/open?id=ID
-
-  let match = urlLimpia.match(patronDrive1);
-  if (!match) {
-    match = urlLimpia.match(patronDrive2);
-  }
-
-  // Si es de Google Drive
-  if (match && match[1]) {
-    const driveId = match[1];
-    const urlFinal = `https://drive.google.com/thumbnail?sz=w1500-h1200&id=${driveId}`;
-    return { success: true, url: urlFinal, esGoogleDrive: true };
-  }
-
-  // Si NO es de Google Drive pero es una URL válida, retornar tal cual
-  return { success: true, url: urlLimpia, esGoogleDrive: false };
-}
 
 // GET /api/noticias/slug/:slug (debe ir antes de /:id)
 router.get('/slug/:slug', async (req, res) => {
@@ -90,6 +57,7 @@ router.get('/slug/:slug', async (req, res) => {
         n.id_noticia, n.cod_unico, n.titulo, n.slug, n.contenido, n.descripcion_corta,
         n.imagen_principal, n.estado, n.fecha_publicacion, n.creado_en, n.id_categoria,
         a.nombre as autor_nombre, a.email as autor_email, a.id_usuario as autor_id_usuario,
+        a.foto as autor_foto, a.descripcion as autor_descripcion,
         c.nombre as categoria_nombre, c.slug as categoria_slug,
         GROUP_CONCAT(DISTINCT CONCAT(k.id_keyword, ':', k.nombre) SEPARATOR '||') as keywords_raw
        FROM noticias n
@@ -127,7 +95,7 @@ router.get('/slug/:slug', async (req, res) => {
 // GET /api/noticias
 router.get('/', async (req, res) => {
   try {
-    const { estado, servicio, categoria, orderBy = 'fecha_publicacion', page = 1, limit = 20 } = req.query;
+    const { estado, servicio, categoria, autor, orderBy = 'fecha_publicacion', page = 1, limit = 20 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     let sql = `
@@ -137,6 +105,7 @@ router.get('/', async (req, res) => {
         n.id_categoria,
         a.nombre as autor_nombre,
         a.id_usuario as autor_id_usuario,
+        a.foto as autor_foto, a.descripcion as autor_descripcion,
         c.nombre as categoria_nombre, c.slug as categoria_slug
       FROM noticias n
       LEFT JOIN autor a ON n.id_autor = a.id_autor
@@ -160,10 +129,32 @@ router.get('/', async (req, res) => {
       params.push(categoria);
     }
 
-    const countSql = `SELECT COUNT(*) as total FROM noticias n WHERE 1=1 ${
-      estado ? 'AND n.estado = ?' : ''
-    } ${servicio ? 'AND n.id_servicio = ?' : ''} ${categoria ? 'AND n.id_categoria = ?' : ''}`;
-    const countParams = params.slice();
+    if (autor) {
+      sql += ' AND a.id_usuario = ?';
+      params.push(autor);
+    }
+
+    // Construir SQL de conteo con los mismos filtros
+    let countSql = 'SELECT COUNT(*) as total FROM noticias n LEFT JOIN autor a ON n.id_autor = a.id_autor WHERE 1=1';
+    const countParams = [];
+
+    if (estado) {
+      countSql += ' AND n.estado = ?';
+      countParams.push(estado);
+    }
+    if (servicio) {
+      countSql += ' AND n.id_servicio = ?';
+      countParams.push(servicio);
+    }
+    if (categoria) {
+      countSql += ' AND n.id_categoria = ?';
+      countParams.push(categoria);
+    }
+    if (autor) {
+      countSql += ' AND a.id_usuario = ?';
+      countParams.push(autor);
+    }
+
     const [{ total }] = await query(countSql, countParams);
 
     if (orderBy === 'creado_en') {
@@ -176,7 +167,28 @@ router.get('/', async (req, res) => {
 
     const noticias = await query(sql, params);
 
-    return res.json({
+    // Si se está filtrando por autor, agregar estadísticas
+    let estadisticas = null;
+    if (autor) {
+      const statsParams = [autor];
+      const [stats] = await query(
+        `SELECT 
+          COUNT(*) as total,
+          SUM(CASE WHEN n.estado = 'publicada' THEN 1 ELSE 0 END) as publicadas,
+          SUM(CASE WHEN n.estado = 'borrador' THEN 1 ELSE 0 END) as borradores
+         FROM noticias n
+         LEFT JOIN autor a ON n.id_autor = a.id_autor
+         WHERE a.id_usuario = ?`,
+        statsParams
+      );
+      estadisticas = {
+        total: stats.total,
+        publicadas: stats.publicadas || 0,
+        borradores: stats.borradores || 0
+      };
+    }
+
+    const response = {
       success: true,
       noticias,
       pagination: {
@@ -185,7 +197,16 @@ router.get('/', async (req, res) => {
         total,
         totalPages: Math.ceil(total / parseInt(limit))
       }
-    });
+    };
+
+    // Agregar estadísticas si están disponibles
+    if (estadisticas) {
+      response.total = estadisticas.total;
+      response.publicadas = estadisticas.publicadas;
+      response.borradores = estadisticas.borradores;
+    }
+
+    return res.json(response);
   } catch (error) {
     console.error('Error al obtener noticias:', error);
     return res.status(500).json({ error: error.message || 'Error en el servidor' });
@@ -318,6 +339,7 @@ router.get('/:id', async (req, res) => {
       `SELECT n.*, 
        a.nombre as autor_nombre, 
        a.id_usuario as autor_id_usuario,
+       a.foto as autor_foto, a.descripcion as autor_descripcion,
        s.nombre as servicio_nombre, 
        c.nombre as categoria_nombre, 
        c.slug as categoria_slug

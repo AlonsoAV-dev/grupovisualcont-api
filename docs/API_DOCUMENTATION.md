@@ -1,8 +1,10 @@
 # 📚 Documentación API - GrupoVisualCont
 
-**Base URL:** `http://localhost:3001` (desarrollo) | `https://tu-dominio.com` (producción)
+## Descripción
 
-**Última actualización:** 23 de Febrero, 2026
+Documentación completa de todos los endpoints REST disponibles en la API del blog de  GrupoVisualCont.
+
+**Base URL**: `http://localhost:3001` (desarrollo) | `https://grupovisualcont-api.vercel.app` (producción)
 
 ---
 

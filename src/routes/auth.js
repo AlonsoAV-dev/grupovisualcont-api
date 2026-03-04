@@ -110,9 +110,27 @@ router.get('/me', async (req, res) => {
       return res.status(401).json({ error: 'No autenticado' });
     }
 
+    // Obtener información adicional del usuario incluyendo foto y descripción del autor
+    const usuarios = await query(
+      `SELECT 
+        u.id_usuario, u.nombre, u.email, u.rol, u.estado,
+        u.creado_en, u.ultimo_login,
+        a.foto, a.descripcion
+       FROM usuarios u
+       LEFT JOIN autor a ON u.id_usuario = a.id_usuario
+       WHERE u.id_usuario = ?`,
+      [user.id]
+    );
+
+    if (usuarios.length === 0) {
+      return res.status(401).json({ error: 'Usuario no encontrado' });
+    }
+
+    const { password, ...userWithDetails } = usuarios[0];
+
     return res.json({
       success: true,
-      user,
+      user: userWithDetails,
     });
   } catch (error) {
     console.error('Error en me:', error);
