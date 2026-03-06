@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const autores = await query(
-      'SELECT id_autor, nombre, email, tipo, estado FROM autor WHERE estado = "activo" ORDER BY id_autor DESC'
+      'SELECT id_autor, nombre, email, foto, descripcion, tipo, estado FROM autor WHERE estado = "activo" ORDER BY id_autor DESC'
     );
 
     return res.json({ success: true, autores });
